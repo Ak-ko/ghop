@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/ak-ko/ghop.git/config"
 	"github.com/ak-ko/ghop.git/service/auth"
 	"github.com/ak-ko/ghop.git/types"
 	"github.com/ak-ko/ghop.git/utils"
@@ -66,7 +67,7 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJson(w, http.StatusCreated, map[string]string{"token": ""}) // token
+	utils.WriteJson(w, http.StatusCreated, nil) // token
 }
 
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -97,5 +98,14 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJson(w, http.StatusCreated, map[string]string{"token": ""}) // token
+	// token generate
+	secret := []byte(config.ENV.JWT_SECRET)
+
+	token, err := auth.CreateToken(secret, user.ID)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	utils.WriteJson(w, http.StatusCreated, map[string]string{"token": token})
 }
