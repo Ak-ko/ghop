@@ -31,25 +31,32 @@ func (h *Handler) AuthenticateRoutes(router *mux.Router) {
 func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var payload types.RegisterUserPayload
 
+	// parsing
 	if err := utils.ParseJSON(r, &payload); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, err)
 	}
 
-	_,err := h.store.GetUserByEmail(payload.Email); if err != nil {
-		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("user already exists"))
-		return
-	}
-
+	// validating
 	if err := utils.Validator.Struct(payload); err != nil {
 		vError := err.(validator.ValidationErrors)
-		utils.WriteError(w, http.StatusBadRequest, vError)
+		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid payload: %v", vError))
 		return
 	}
 
-	hashedPassword, err := auth.HashPassword(payload.Password); if err != nil {
+	// check user exists
+	_,err := h.store.GetUserByEmail(payload.Email)
+	if err == nil {
+		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("user with email %s already exists", payload.Email))
+		return
+	}
+
+	// hashing
+	hashedPassword, err := auth.HashPassword(payload.Password)
+	 if err != nil {
 		utils.WriteError(w, http.StatusInternalServerError, err)
 	}
 
+	// creating a user
 	if err = h.store.CreateUser(types.User{
 		Username: payload.Username,
 		Email: payload.Email,
@@ -59,9 +66,36 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJson(w, http.StatusCreated, nil)
+	utils.WriteJson(w, http.StatusCreated, map[string]string{"token": ""}) // token
 }
 
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var payload types.LoginUserPayload
 
+	// parsing
+	if err := utils.ParseJSON(r, &payload); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+	}
+
+	// validate
+	if err := utils.Validator.Struct(payload); err != nil {
+		vError := err.(validator.ValidationErrors)
+		utils.WriteError(w, http.StatusBadRequest, vError)
+		return
+	}
+
+	// check user exists
+	user, err := h.store.GetUserByEmail(payload.Email)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid credentials"))
+	}
+
+	// password check
+	pwMatch := auth.ComparePasswords(user.Password, []byte(payload.Password))
+	if !pwMatch {
+		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("incorrect password"))
+		return
+	}
+
+	utils.WriteJson(w, http.StatusCreated, map[string]string{"token": ""}) // token
 }
