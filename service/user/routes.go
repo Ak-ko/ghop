@@ -1,7 +1,6 @@
 package user
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/ak-ko/ghop.git/config"
@@ -23,38 +22,40 @@ func NewHandler(store types.UserStore) *Handler {
 }
 
 func (h *Handler) AuthenticateRoutes(router *mux.Router) {
-	router.HandleFunc("/register", h.handleRegister).Methods("POST")
-	router.HandleFunc("/login", h.handleLogin).Methods("POST")
+	router.HandleFunc("/register", utils.MakeHTTPHandler(h.handleRegister))
+	router.HandleFunc("/login", utils.MakeHTTPHandler(h.handleLogin))
 }
 
 
 
-func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) error {
+	if r.Method != http.MethodPost {
+		return utils.ApiError{Err: "method not allowed", Status: http.StatusMethodNotAllowed}
+	}
+
 	var payload types.RegisterUserPayload
 
 	// parsing
 	if err := utils.ParseJSON(r, &payload); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, err)
+		return utils.ApiError{Err: err.Error(), Status: http.StatusBadRequest}
 	}
 
 	// validating
 	if err := utils.Validator.Struct(payload); err != nil {
 		vError := err.(validator.ValidationErrors)
-		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid payload: %v", vError))
-		return
+		return utils.ApiError{Err: vError.Error(), Status: http.StatusBadRequest}
 	}
 
 	// check user exists
 	_,err := h.store.GetUserByEmail(payload.Email)
 	if err == nil {
-		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("user with email %s already exists", payload.Email))
-		return
+		return utils.ApiError{Err: "user existed", Status: http.StatusBadRequest}
 	}
 
 	// hashing
 	hashedPassword, err := auth.HashPassword(payload.Password)
 	 if err != nil {
-		utils.WriteError(w, http.StatusInternalServerError, err)
+		return utils.ApiError{Err: err.Error(), Status: http.StatusInternalServerError}
 	}
 
 	// creating a user
@@ -63,39 +64,40 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		Email: payload.Email,
 		Password: hashedPassword,
 	}); err != nil {
-		utils.WriteError(w, http.StatusInternalServerError, err)
-		return
+		return utils.ApiError{Err: err.Error(), Status: http.StatusInternalServerError}
 	}
 
-	utils.WriteJson(w, http.StatusCreated, nil) // token
+	return utils.WriteJson(w, http.StatusOK, nil) // token
 }
 
-func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) error {
+	if r.Method != http.MethodPost {
+		return utils.ApiError{Err: "method not allowed", Status: http.StatusMethodNotAllowed}
+	}
+
 	var payload types.LoginUserPayload
 
 	// parsing
 	if err := utils.ParseJSON(r, &payload); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, err)
+		return utils.ApiError{Err: err.Error(), Status: http.StatusBadRequest}
 	}
 
 	// validate
 	if err := utils.Validator.Struct(payload); err != nil {
 		vError := err.(validator.ValidationErrors)
-		utils.WriteError(w, http.StatusBadRequest, vError)
-		return
+		return utils.ApiError{Err: vError.Error(), Status: http.StatusBadRequest}
 	}
 
 	// check user exists
 	user, err := h.store.GetUserByEmail(payload.Email)
 	if err != nil {
-		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid credentials"))
+		return utils.ApiError{Err: "invalid credentials", Status: http.StatusBadRequest}
 	}
 
 	// password check
 	pwMatch := auth.ComparePasswords(user.Password, []byte(payload.Password))
 	if !pwMatch {
-		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("incorrect password"))
-		return
+		return utils.ApiError{Err: "incorrect password", Status: http.StatusBadRequest}
 	}
 
 	// token generate
@@ -103,9 +105,8 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	token, err := auth.CreateToken(secret, user.ID)
 	if err != nil {
-		utils.WriteError(w, http.StatusInternalServerError, err)
-		return
+		return utils.ApiError{Err: err.Error(), Status: http.StatusInternalServerError}
 	}
 
-	utils.WriteJson(w, http.StatusCreated, map[string]string{"token": token})
+	return utils.WriteJson(w, http.StatusCreated, map[string]string{"token": token})
 }
